@@ -1,0 +1,162 @@
+---
+title: "Does a cars MPG depend on its Transmission?"
+author: "Janamejaya Chowdhary"
+date: "February 6, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Executive Summary
+On behalf of the magazine, Motor Trends, analyze vehicle features for a collection of cars (mtcars dataset) in order to (a) determine whether an Automatic or a Manual Transmission is better for a cars MPG and (b) quantify the MPG difference between Automatic and Manual Transmissions.
+
+## Exploratory data analysis
+To start, the mtcars dataset is loaded as a dataframe and the contents summarized as follows
+```{r varnames}
+data(mtcars); colnames(mtcars)
+```
+```{r include all libraries, include=FALSE}
+library(ggplot2);library(GGally);library(corrplot); library(grid); library(gridExtra)
+```
+The dataset contains values of 11 features for each car. The features of primary interest are **mpg** (miles per gallon) and **am** (**0**: Automatic Transmission (**AT**) and **1** for Manual Transmission (**MT**)). Correlation of **mpg** with all features is calculated below
+```{r pair_cor, cache=T}
+mcor <- cor(mtcars); mcor <- round(mcor,2); mcor["mpg",]
+```
+The features most and least correlated with **mpg** are **wt** (cor=0.89) and **qsec** (cor=0.42), respectively. The feature of interest, **am**, has intermediate correlation (cor=0.6) with **mpg**. The full correlation matrix and pair feature dependence are presented in Appendix A1 and A2 respectively. Correlation between **cyl** and **disp** (cor=0.9) is very high. Of these, the highest correlation is between **wt** and **disp** (cor=0.89). It may be prudent to remove **disp** from the following Regression analysis.
+
+## Univariate Linear Regression analysis
+A simple univariate regression between **mpg** and **am** is performed first.
+```{r simple_reg, cache=T}
+fit1 <- lm(mpg ~ as.factor(am), data=mtcars)
+summary(fit1)$coeff
+```
+From this, the mean **mpg** value for **AT** is the intercept `r round(summary(fit1)$coeff[1],2)`. The slope `r round(summary(fit1)$coeff[2],2)` corresponds to the difference in mean **mpg** values for **AT** and **MT**. So, the mean **mpg** for **MT** is `r round(summary(fit1)$coeff[1] + summary(fit1)$coeff[2],2)`. To establish the significance of this difference between mean values, the null hypothesis that there is no difference between mean **mpg** values for **AT** and **MT** is tested next.
+```{r simple_t_test, cache=T}
+ttest <- t.test(mpg ~ am, data=mtcars)
+```
+The 95% confidence interval (`r round(ttest$conf.int[c(1,2)],2)`) does not contain zero. Hence, the null hypothesis is rejected. Thus, the difference in mean **mpg** between **AT** and **MT** is non-zero.
+
+## Multivariate Linear Regression analysis
+For the linear model (fit1), percentage of variance explained $R^2=$ `r round(summary(fit1)$r.squared,2)` and its value adjusted for number of predictors is
+adj.$R^2=$ `r round(summary(fit1)$adj.r.squared,2)`. The small values indicate that other variables may be significant. A multivariate regression is performed with all features excluding **disp** as it is highly correlated with other features.
+```{r allminusdisp, cache=T}
+fit2 <- lm(mpg ~ cyl + hp + drat + wt + qsec + vs + factor(am) + gear + carb, data=mtcars)
+```
+The values of $R^2=$ `r round(summary(fit2)$r.squared, 2)` and adj.$R^2=$ `r round(summary(fit2)$adj.r.squared,2)` are much better fit1 but p-values for coefficients are too large.
+```{r pvalues_fit2, echo=F, cache=T}
+round(summary(fit2)[[4]][,4],2)
+```
+```{r hiddenfit2, echo=F, cache=T}
+fit8 <- lm(mpg ~ wt + qsec + as.factor(am), data=mtcars)
+```
+To improve fit quality, the feature with largest p-value is dropped, the linear model refit, and the process continued till all p-values are small. The order of feature deletion is **vs**, **cyl**, **gear**, **hp**, **drat**, and **carb**. The final model (below) has $R^2=$ `r round(summary(fit8)$r.squared,2)`, adj.$R^2=$ `r round(summary(fit8)$adj.r.squared,2)` (better than fit2), and the following coefficients
+```{r bestlinear, cache=T}
+fit8 <- lm(mpg ~ wt + qsec + as.factor(am), data=mtcars)
+```
+```{r bestlinearcoeff, cache=T}
+fit8$coefficients
+```
+Based on these coefficients, cars with MT have on average `r round(fit8$coefficients[4],2)` more **mpg** than those with AT. 
+
+To improve the model, **am** is eliminated from fit8 or interaction between **wt** and **qsec** are introduced in fit8. The former improves the fit, the latter degrades it with respect to fit8. Based on Appendix A2, **mpg** depends on **wt** and **qsec** as a function of **am**. So introduce **am** as an interaction term but not as an independent feature. Several combinations of terms in the model were checked and the best fit quality was selected (see Appendix A3). The intercept term was removed to obtain the model
+```{r bestnonlinearlinear, cache=T}
+fit23 <- lm(mpg ~ wt:as.factor(am) + qsec:as.factor(am)-1, data=mtcars)
+```
+The final value of $R^2=$ `r round(summary(fit23)$r.squared,2)` and adj.$R^2=$ `r round(summary(fit23)$adj.r.squared,2)` are better than that for fit8. The p-values for each coefficient (below) are also statistically quite significant
+```{r pvalues_fit23, echo=F, cache=T}
+summary(fit23)[[4]][,4]
+```
+This model has zero intercept. Consequently, a cars transmission type has no direct effect on its **mpg**.
+
+## Analysis of residuals
+From Appendix A4, Panel B, all residuals are normally distribution. Panel A and C show the absence of any systematic patterns indicative of underlying errors in the model. Panel D shows the lack of outliers or influential points. Thus, the residuals satisfy the underlying assumptions of linear regression and the model fits the data well.
+
+## Conclusion
+Although model dependent, the best model suggests that there is no difference in mean **MPG** between automatic and manual transmissions. 
+Rather, the dependence of **MPG** on a vehicles weight(**wt**) and its $\frac{1}{4}$-mile time (**qsec**) is linear, although different for automatic and manual transmissions.
+
+## Appendix
+### A1: Correlation of pairs of variables.
+```{r pair_corr, fig.align='center', echo=F,cache=T, warning=F,fig.width=5,fig.height=5}
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+corrplot(mcor, method="shade", shade.col=NA, number.cex=0.75, tl.col="black", tl.srt=45, col=col(50), addCoef.col="black", order="hclust", addrect=2)
+```
+### A2: Variation of pairs of variables as a function of Transmission type
+```{r reload ggpairs, echo=FALSE}
+data(mtcars)
+mtcars$am <- as.factor(mtcars$am)
+```
+```{r mtcars_pairs, fig.align='center',echo=F, cache=T, warning=F,fig.width=8, fig.height=8}
+ggpairs(data=mtcars,
+        title="Motor Trends Car Road Tests dataset: Transmission (am) -  {0:Automatic, 1:Manual}",
+        mapping=ggplot2::aes(color=am, fill=am),
+        legend=c(9,9),
+        lower=list(combo=wrap('facethist',binwidth=1),
+                   continuous=wrap('smooth'),
+                   discrete=wrap('facetbar')
+                   ),
+        upper=list(continuous = wrap(ggally_cor, size = 3.25, alignPercent=1)
+                  ),
+        diag = list(continuous=wrap('densityDiag', alpha=0.1),
+                    discrete='barDiag'),
+        axisLabels="none"
+       )
+```
+
+## A3: ANOVA for regression models with interaction terms
+```{r anova_int, echo=F, cache=T}
+fit8  <- lm(mpg~ wt + qsec + as.factor(am), data=mtcars)
+fit9  <- lm(mpg~ wt+qsec, data=mtcars)
+fit10 <- lm(mpg~ wt+qsec+wt:qsec, data=mtcars)
+fit11 <- lm(mpg ~ wt + qsec + wt:factor(am)+qsec:factor(am), data=mtcars)
+fit12 <- lm(mpg ~ wt + qsec + wt:factor(am), data=mtcars)
+fit13 <- lm(mpg ~ wt + wt:factor(am), data=mtcars)
+fit14 <- lm(mpg ~ qsec + wt:factor(am), data=mtcars)
+fit15 <- lm(mpg ~ wt + qsec + qsec:factor(am), data=mtcars)
+fit16 <- lm(mpg ~ wt + qsec:factor(am), data=mtcars)
+fit17 <- lm(mpg ~ qsec:factor(am), data=mtcars)
+fit18 <- lm(mpg ~ qsec + wt:factor(am)+qsec:am, data=mtcars)
+fit19 <- lm(mpg ~ qsec + wt:factor(am), data=mtcars)
+fit20 <- lm(mpg ~ qsec + qsec:factor(am), data=mtcars)
+fit21 <- lm(mpg ~ wt:factor(am) + qsec:factor(am), data=mtcars)
+fit22 <- lm(mpg ~ wt + wt:factor(am) + qsec:factor(am), data=mtcars)
+anova(fit8, fit9, fit10, fit11, fit12, fit13, fit14, fit15, fit16, fit17, fit18, fit19, fit20, fit21, fit22)
+```
+
+## A4: Diagnostic plots for non-linear regression
+```{r diagnostics, fig.align='center', fig.height=4, warning=F, echo=F}
+diagPlot<-function(model){
+  p1<-ggplot(model, aes(.fitted, .resid))+geom_point(na.rm=TRUE, alpha=0.3)
+  p1<-p1+stat_smooth(method="loess")+geom_hline(yintercept=0, col="red", linetype="dashed")
+  p1<-p1+xlab("Fitted values")+ylab("Residuals")
+  p1<-p1+ggtitle("A. Residual vs Fitted Plot")+ theme(plot.title = element_text(hjust = 0.5))
+  
+  p2 <- ggplot(model, aes(qqnorm(.stdresid)[[1]], .stdresid))+geom_point(na.rm = TRUE, alpha=0.3)
+  p2 <- p2+geom_abline(col="blue")+xlab("Theoretical Quantiles")+ylab("Standardized Residuals")
+  p2 <- p2+ggtitle("B. Normal Q-Q")+ theme(plot.title = element_text(hjust = 0.5))
+  
+  p3<-ggplot(model, aes(.fitted, sqrt(abs(.stdresid))))+geom_point(na.rm=TRUE, alpha=0.3)
+  p3<-p3+stat_smooth(method="loess", na.rm = TRUE)+xlab("Fitted Value")
+  p3<-p3+ylab(expression(sqrt("|Standardized residuals|")))
+  p3<-p3+ggtitle("C. Scale-Location")+ theme(plot.title = element_text(hjust = 0.5))
+  
+  p4<-ggplot(model, aes(.hat, .stdresid))+geom_point(aes(size=.cooksd), na.rm=TRUE, alpha=0.3)
+  p4<-p4+stat_smooth(method="loess", na.rm=TRUE)
+  p4<-p4+xlab("Leverage")+ylab("Standardized Residuals")
+  p4<-p4+ggtitle("D. Residual vs Leverage Plot")+ theme(plot.title = element_text(hjust = 0.5))
+  p4<-p4+scale_size_continuous("Cook's Distance", range=c(1,4), trans="identity")
+  p4<-p4+theme(legend.position=c(0.55,0.82), legend.key = element_rect(colour = "transparent"), legend.box.background=element_rect(color="transparent"), legend.background = element_rect(fill="grey92",colour="transparent"), strip.background=element_rect(fill="grey85", colour="transparent"), legend.key.size=unit(0.3,"cm"))
+  
+  return(list(rvfPlot=p1, qqPlot=p2, sclLocPlot=p3, rvlevPlot=p4))
+}
+fortified_fit23 <- fortify(fit23)
+diagPlts<-diagPlot(fortified_fit23)
+lbry<-c("grid", "gridExtra")
+tmpvar <- lapply(lbry, require, character.only=TRUE, warn.conflicts = FALSE, quietly = TRUE)
+grid.arrange(diagPlts$rvfPlot, diagPlts$qqPlot, diagPlts$sclLocPlot, diagPlts$rvlevPlot)
+```
+

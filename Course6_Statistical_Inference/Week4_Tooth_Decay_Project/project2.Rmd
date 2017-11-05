@@ -1,0 +1,217 @@
+---
+title: 'Inferring factors affecting Tooth Growth'
+author: "Janamejaya Chowdhary"
+output:
+  pdf_document: default
+  html_document:
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.path='./figure/')
+```
+## Synopsis
+For the Tooth Growth dataset, several hypothesis are tested in order to identify the effect of supplement type and dose amount on tooth length. Based on hypothesis testing, we fail to reject the hypothesis that tooth length is dependent on supplement type and accept the alternative hypothesis that tooth length is dependent on supplement dose.
+
+## Data exploration and summary
+Here, the data available in the ToothGrowth dataset is explored.
+```{r summarize data}
+data("ToothGrowth")
+str(ToothGrowth)
+```
+The dataset contains three columns: length, supplement and dose. Length is a continuous variable. There are two supplements, VC and OJ. To range of distinct values of dose can be identified with
+```{r summarize dose data}
+str(ToothGrowth$dose <- as.factor(ToothGrowth$dose))
+```
+So, dose is a variable with three levels (0.5, 1, 2). The data falls into 6 groups based on the combination of dose and supplement. Distributions of the data are presented below along with the mean and bootstrap confidence limits in red. R Codes are in Appendices 1 and 2.
+
+```{r make plot objects1, echo=FALSE, fig.height=3, fig.align="center"}
+# First, the plot of length versus supplement type
+library(ggplot2)
+library(grid)
+library(gridExtra)
+g1 <- ggplot(data=ToothGrowth, aes(x=supp, y=len))
+g1 <- g1 + geom_violin(aes(fill=supp))
+g1 <- g1 + geom_point()
+g1 <- g1 + stat_summary(fun.data = "mean_cl_boot", colour = "red", size = 1)
+g1 <- g1 + ylab("Length")
+g1 <- g1 + xlab("Supplement Type")
+
+# Second, the plot of length versus dose
+g2 <- ggplot(data=ToothGrowth, aes(x=dose, y=len))
+g2 <- g2 + geom_violin(aes(fill=dose))
+g2 <- g2 + geom_point()
+g2 <- g2 + stat_summary(fun.data = "mean_cl_boot", colour = "red", size = 1)
+g2 <- g2 + ylab("Length")
+g2 <- g2 + xlab("Supplement Dose")
+
+grid.arrange(g1, g2, nrow=1, ncol=2, top=textGrob("Figure 1: Distribution of Tooth Length for different supplement type or dose", gp=gpar(fontsize=13.75, font=1)))
+```
+```{r make plot object2, echo=FALSE, fig.height=3, fig.align="center"}
+g3 <- ggplot(data=ToothGrowth, aes(x=supp, y=len))
+g3 <- g3 + geom_violin(aes(fill=supp))
+g3 <- g3 + facet_wrap(~dose)
+g3 <- g3 + geom_point()
+g3 <- g3 + stat_summary(fun.data = "mean_cl_boot", colour = "red", size = 1)
+g3 <- g3 + ylab("Length")
+g3 <- g3 + xlab("Supplement type")
+g3 <- g3 + ggtitle("Figure 2: Distribution of Tooth Length for different supplement type and doses")
+plot(g3)
+```
+
+## Results
+In the following, results for hypothesis testing at the 95% confidence level is presented. We are interested in comparing data from pairs of distinct groups. Hence, a two sample t-test for differences in the population mean for the two groups, assuming unequal variances, is selected for hypothesis testing. The hypothesis to be tested as presented below
+
+$H_0: \mu_{Group1}=\mu_{Group2}$  (Null Hypothesis)
+
+$H_a: \mu_{Group1}\neq\mu_{Group2}$  (Alternate Hypothesis)
+
+## Hypothesis Testing: Tooth Growth by Supplement
+Since there are two supplements, OJ and VC, we set group1=OJ and group2=VC.
+The statistical significance of the null hypothesis is tested at the 95% confidence interval
+by calculating the p-value
+```{r statistical significance1}
+tsuppl <- t.test(len ~ supp, paired = FALSE, var.equal = FALSE, data = ToothGrowth)
+tsuppl$p.value
+```
+The p-value of `r tsuppl$p.value` exceeds the alpha level of 0.05. Therefore, the Null hypothesis cannot be rejected. Even though the mean of the distributions(Figure1) appear to differ, we cannot reject the hypothesis that OJ and VC have the same effect on tooth growth.
+
+## Hypothesis Testing: Tooth Growth by Dose
+There are three doses and we can make comparisons for the dose pair (0.5, 1), (1, 2), and (0.5, 2). To do so, the data frame is partitioned into subsets containing data for each dose pair.
+```{r split dataset, message=FALSE}
+library(dplyr)
+df_0.5_1.0 <- ToothGrowth %>% filter(dose!=2)
+df_0.5_2.0 <- ToothGrowth %>% filter(dose!=1)
+df_1.0_2.0 <- ToothGrowth %>% filter(dose!=0.5)
+```
+### Compare the Tooth Growth for doses of 0.5 and 1.0
+Here, we select Group1=(dose=0.5) and Group2=(dose=1.0) and perform hypothesis testing for the difference in means for each group. The p-value is calculated as
+```{r statistical significance2}
+tsuppl_0.5_1.0<-t.test(len ~ dose, paired=FALSE, var.equal=FALSE, data=df_0.5_1.0)
+tsuppl_0.5_1.0$p.value
+```
+The p-value is smaller than the alpha level of 0.05. Therefore, we reject the null hypothesis and favor the hypothesis that the two groups have statistically different means. Since the mean tooth length for a dose of 0.05 is smaller than that for a dose of 1 (Figure 1), we can favor the hypothesis that dose=1.0 leads to more tooth growth than dose=0.05.
+
+### Compare the Tooth Growth for doses of 1.0 and 2.0
+Here, we select Group1=(dose=1.0) and Group2=(dose=2.0) for hypothesis testing. The p-value is calculated as
+```{r statistical significance3}
+tsuppl_1.0_2.0<-t.test(len ~ dose, paired=FALSE, var.equal=FALSE, data=df_1.0_2.0)
+tsuppl_1.0_2.0$p.value
+```
+The p-value is smaller than the alpha level of 0.05. Therefore, we reject the null hypothesis and favor the hypothesis that Group1 and Group2 have different mean values. As the mean value for Group2 (dose=2) exceeds the mean value for Group1(see Figure 1), we can favor the hypothesis that a dose of 2 causes more tooth growth than a dose of 1.
+
+Since the mean tooth length for the doses of 0.5 and 1.0 are different, and a mean tooth length for doses of 1.0 and 2.0 are different, it is inferred that the mean tooth length for doses of 0.5 and 2.0 are not equal. Based on the mean values of tooth length for each dose, the general trend appears to be that the higher dose leads to longer teeth.
+
+**NOTE** The effect of supplement type is best discerned as a function of dose. However, this analysis is not presented here due to page limits for the report. Figure 2 above does suggest that OJ is more effective than VC at doses of 0.5 and 1.0. For the 2.0 dose, the mean values are not distinct enough to conclude either supplement is more effective. This analysis is presented in Appendix 3
+
+## Conclusions
+Based on the data and statistical hypothesis testing,
+1. we conclude that different supplement doses (independent of supplement type) lead to different tooth growth. Higher dose is likely to lead to more tooth growth.
+2. we cannot reject the possibility that different supplement types (independent of supplement dose) have the same effect on tooth growth
+
+## Assumptions
+1. The population distribution is approximately Normal.
+2. The sample variances for pairs of groups are different.
+
+## Appendix
+### 1. R code to plot tooth length versus supplement type or dose amount
+```{r make plot objects1_noeval, eval=FALSE, fig.height=3, fig.align="center"}
+# First, the plot of length versus supplement type
+library(ggplot2)
+library(grid)
+library(gridExtra)
+g1 <- ggplot(data=ToothGrowth, aes(x=supp, y=len))
+g1 <- g1 + geom_violin(aes(fill=supp))
+g1 <- g1 + geom_point()
+g1 <- g1 + stat_summary(fun.data = "mean_cl_boot", colour = "red", size = 1)
+
+# Second, the plot of length versus dose
+g2 <- ggplot(data=ToothGrowth, aes(x=dose, y=len))
+g2 <- g2 + geom_violin(aes(fill=dose))
+g2 <- g2 + geom_point()
+g2 <- g2 + stat_summary(fun.data = "mean_cl_boot", colour = "red", size = 1)
+
+grid.arrange(g1, g2, nrow=1, ncol=2, top=textGrob("Distribution of Tooth Length
+                                                  for different supplement or dose", gp=gpar(fontsize=13.75, font=1)))
+```
+
+### 2. R code to plot tooth length versus supplement type and dose amount
+```{r make plot object2_noeval, eval=FALSE, fig.height=3, fig.align="center"}
+g3 <- ggplot(data=ToothGrowth, aes(x=supp, y=len))
+g3 <- g3 + geom_violin(aes(fill=supp))
+g3 <- g3 + facet_wrap(~dose)
+g3 <- g3 + geom_point()
+g3 <- g3 + stat_summary(fun.data = "mean_cl_boot", colour = "red", size = 1)
+g3 <- g3 + ylab("Length")
+g3 <- g3 + xlab("Supplement type")
+g3 <- g3 + ggtitle("Distribution of Tooth Length for different supplement and doses")
+plot(g3)
+```
+
+### 3. Hypothesis testing based on supplement type and dose amount pairs
+To consider data subsets based on supplement type (2 levels) and dose amount (3 levels) pairs, the data is split into 6 groups.
+```{r split data into 6 groups}
+df_oj_0.5 <- ToothGrowth %>% filter(dose==0.5) %>% filter(supp=="OJ") %>% select(len)
+df_oj_1.0 <- ToothGrowth %>% filter(dose==1.0) %>% filter(supp=="OJ") %>% select(len)
+df_oj_2.0 <- ToothGrowth %>% filter(dose==2.0) %>% filter(supp=="OJ") %>% select(len)
+df_vc_0.5 <- ToothGrowth %>% filter(dose==0.5) %>% filter(supp=="VC") %>% select(len)
+df_vc_1.0 <- ToothGrowth %>% filter(dose==1.0) %>% filter(supp=="VC") %>% select(len)
+df_vc_2.0 <- ToothGrowth %>% filter(dose==2.0) %>% filter(supp=="VC") %>% select(len)
+```
+
+Let us start with comparision between supplement types for doses of 0.5, 1.0 and 2.0.
+
+#### 3.A1 Hypothesis testing for supplement types at dose=0.5
+```{r statistical significancea}
+tsuppl_0.5_supp<-t.test(df_oj_0.5, df_vc_0.5, paired=FALSE, var.equal=FALSE)
+tsuppl_0.5_supp$p.value
+```
+The p-value is smaller than 0.05, so we reject the null hypothesis that the mean values for OJ and VC are different. The alternate hypothesis that VC and OJ lead to different mean tooth lengths should be considered. As the mean for OJ is higher than that for VC, the hypothesis that OJ is more effective than VC at a dose of 0.5 should be considered.
+
+#### 3.A2 Hypothesis testing for supplement types at dose=1.0
+```{r statistical significanceb}
+tsuppl_1.0_supp<-t.test(df_oj_1.0, df_vc_1.0, paired=FALSE, var.equal=FALSE)
+tsuppl_1.0_supp$p.value
+```
+The p-value is smaller than 0.05, so we reject the null hypothesis that the mean values for OJ and VC are different. The alternate hypothesis that VC and OJ lead to different mean tooth lengths should be considered. As the mean for OJ is higher than that for VC, the hypothesis that OJ is more effective than VC at a dose of 1.0 should be considered.
+
+#### 3.A3 Hypothesis testing for supplement types at dose=2.0
+```{r statistical significancec}
+tsuppl_2.0_supp<-t.test(df_oj_2.0, df_vc_2.0, paired=FALSE, var.equal=FALSE)
+tsuppl_2.0_supp$p.value
+```
+The p-value is larger than 0.05, so we cannot reject the null hypothesis that the mean values for OJ and VC are different. From the figure, it appears that 
+
+**SUMMARY**: The mean tooth length due to VC and OJ supplementation is significantly different for dosage of 0.5 and 1.0. At a high dose of 2.0, we cannot reject the possibility that the mean tooth lengths due to VC and OJ are equal.
+
+#### 3.B1 Hypothesis testing for OJ at doses of 0.5 and 1.0
+```{r statistical significanceb1}
+tsuppl_oj_0.5_1.0<-t.test(df_oj_0.5, df_oj_1.0, paired=FALSE, var.equal=FALSE)
+tsuppl_oj_0.5_1.0$p.value
+```
+The p-value is less than the alpha level of 0.05, so we reject the null hypothesis that the mean values of tooth length for OJ due to doses of 0.5 and 1.0 are equal. From Figure 2, it appears that the mean tooth length is larger for the higher dosage of OJ.
+
+#### 3.B2 Hypothesis testing for OJ at doses of 1.0 and 2.0
+```{r statistical significanceb2}
+tsuppl_oj_1.0_2.0<-t.test(df_oj_1.0, df_oj_2.0, paired=FALSE, var.equal=FALSE)
+tsuppl_oj_1.0_2.0$p.value
+```
+The p-value is larger than 0.05, so we cannot reject the null hypothesis that the mean value of tooth length due to OJ supplementation is equal for doses of 1.0 and 2.0
+
+**SUMMARY**: Due to OJ supplementation, tooth length increases as a result of increase in dose from 0.5 to 1.0. However, no statistically significant increase in tooth length between dosage of 1.0 and 2.0 is inferred.
+
+#### 3.C1 Hypothesis testing for VC at doses of 0.5 and 1.0
+```{r statistical significancec1}
+tsuppl_vc_0.5_1.0<-t.test(df_vc_0.5, df_vc_1.0, paired=FALSE, var.equal=FALSE)
+tsuppl_vc_0.5_1.0$p.value
+```
+The p-value is less than the alpha level of 0.05, so we reject the null hypothesis that the mean value of tooth length due to VC dosages of 0.5 and 1.0 are equal. From Figure 2, it appears that the mean tooth length increases as the dose increases from 0.5 to 1.
+
+#### 3.C2 Hypothesis testing for VC at doses of 1.0 and 2.0
+```{r statistical significancec2}
+tsuppl_vc_1.0_2.0<-t.test(df_vc_1.0, df_vc_2.0, paired=FALSE, var.equal=FALSE)
+tsuppl_vc_1.0_2.0$p.value
+```
+The p-value is less than the alpha level of 0.05, so we reject the null hypothesis that the mean values of tooth length due to VC dosages of 1.0 and 2.0 are equal. From Figure 2, it appears that the mean tooth length increases as the dosage increases from 1.0 to 2.0
+
+**SUMMARY**: As the dose of VC increases, the mean tooth length also increases.

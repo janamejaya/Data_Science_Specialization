@@ -1,0 +1,49 @@
+---
+title: "Week 3 Assignment - Developing Data Products (Coursera)"
+author: "Janamejaya Chowdhary"
+date: "November 1, 2017"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Craft Brewery Boom in Tennessee
+```{r load_libraries, echo=FALSE, message=FALSE}
+library(plotly)
+library(plyr)
+```
+
+```{r read_data_and_process, echo=FALSE, message=FALSE, warning=FALSE}
+df <- read.csv("data.csv",header=TRUE)
+total <- count(df$Established)
+fit <- fitted(loess(total$freq ~ total$x))
+p1 <- total %>% 
+      plot_ly(x = ~x,
+              y = ~freq, 
+              type = "bar", 
+              color = ~freq,
+              colors = c("green","orange"),
+              showlegend=FALSE,
+              text = paste(total$x,total$freq,sep=' : '),
+              hoverinfo="text" 
+              ) %>%
+      add_lines(y = fit, showlegend=FALSE, color='black') %>%
+      add_markers(y = fit, showlegend=FALSE) %>%
+      layout(showlegend=FALSE,
+             xaxis = list(title="Year Established",
+                          size=24,
+                          family="Times-Roman",
+                          color="green",
+                          side="right", 
+                          showgrid=FALSE),
+             yaxis=list(title="Number of Breweries",
+                        size=24,
+                        family="Times-Roman",
+                        color="green",
+                        showgrid=FALSE)
+             ) %>%
+      hide_colorbar()
+p1
+```

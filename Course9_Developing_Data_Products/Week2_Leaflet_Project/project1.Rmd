@@ -1,0 +1,46 @@
+---
+title: "Tennessee Breweries"
+output:
+  html_document:
+    highlight: tango
+    number_sections: no
+    theme: cosmo
+    toc: no
+    keep_md: true
+  pdf_document:
+    toc: no
+date: "October 27, 2017"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r read_data, echo=FALSE, message=FALSE}
+df1 <- read.csv("data.csv",header=TRUE)
+#colnames(df1)<-c("Name","Address","Location","Type","Beer_Count","Established")
+```
+
+```{r load libraries, echo=FALSE, message=FALSE}
+library(dplyr)
+#library(rgdal)
+library(leaflet)
+```
+
+```{r map_type_color, echo=FALSE, message=FALSE}
+dfc <- data.frame(Type=c("Brewpub/Brewery", "Microbrewery","Brewpub","Client Brewer"), Col = c("green","red","blue","purple"))
+```
+
+```{r merge_df1_dfc_on_Type, echo=FALSE, message=FALSE}
+df2 <- merge(df1, dfc, by="Type")
+```
+
+```{r make_leaflet_map, echo=FALSE, message=FALSE}
+df2 %>%
+  leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(label = paste(df2$Name,", ",df2$Location), popup = paste(df2$Name,", ",df2$Address), clusterOptions = markerClusterOptions(), color=df2$Col, fillOpacity=0.25) %>%
+  addLegend(label=c("Brewpub/Brewery", "Microbrewery","Brewpub","Client Brewer"), colors=c("green","red","blue","purple"))
+```
+
+###### Data primarily sourced from https://www.ratebeer.com/breweries/tennessee/42/213/

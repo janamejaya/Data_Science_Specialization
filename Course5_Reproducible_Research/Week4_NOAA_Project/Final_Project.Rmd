@@ -1,0 +1,621 @@
+---
+title: Identifying weather events that have the most significant human health and economic impact from the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database
+author: "Janamejaya Chowdhary"
+date: "October 17, 2016"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.path='./figure/')
+```
+
+## Synopsis
+A reproducible exploratory data analysis of the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm data from January 1950 to November, 2011 is presented in this report. The objective of this analysis is to identify which weather events (a) cause the most harm to human health and (b) have the greatest economic impact. To answer these questions, data containing the human and economic impact of several severe weather events is downloaded from the Coursera website. The total number of human fatalities and injuries as a result of each weather event occurring between 1950 and 2011 and their total number per weather event were calculated. The data shows that Tornadoes, followed by either Excessive Heat, Floods, and Thunderstorms cause the most harm to humans. The total dollar value of Property and Crop damage as well as their total value for each weather event were calculated to estimate the economic impact. In contrast to the human toll, economic losses are highest due to Floods, followed by Hurricanes, Thunderstorms, and Tornadoes. Thus, different weather events have different economic and human impacts.
+
+## Data Processing
+[Data](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2) , [Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf), and a [FAQ](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf) are downloaded from the course website.
+
+The following packages are loaded to assist with data analysis and visualization
+```{r Load packages, echo=TRUE}
+library(dplyr)
+library(downloader)
+library(ggplot2)
+library(reshape2)
+library(RColorBrewer)
+```
+
+### Data download and import
+A Bzipped CSV data file (StormData.csv.bz2) is downloaded from the course website into the local directory "./data"
+```{r Download data, echo=TRUE}
+# Download data to local directory ./data
+if(!file.exists("./data")){dir.create("./data")}
+fileURL <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+bz2.filename <- "data/StormData.csv.bz2"
+if(!file.exists("./data/StormData.csv.bz2")) { download(fileURL, bz2.filename, mode = "wb")}
+```
+
+To see the type of data available in the CSV format data file, the header and first five rows are read in. Column names are printed out
+```{r Exploratory file read, echo=TRUE}
+# First read in the first 5 lines from the CSV file
+df <- read.csv("data/StormData.csv.bz2", header=TRUE, nrows=5)
+
+# Look at the names of the columns
+names(df)
+```
+
+EVTYPE contains information on type of weather event. The possible entries in this column are listed on Page 6, Table 2.1.1 of the documentation. FATALITIES and INJURIES contain information on the number of fatalities and injuries due to the weather event. 
+
+As per the documentation (Page 12/97),"Estimates should be rounded to three significant digits, followed by an alphabetical character signifying the magnitude of the number,i.e., 1.55B for $1,550,000,000". The resultant entry is then split into 1.55 and B which appear in separate columns, e.g., in PROPDMG and PROPDMGEXP. Economic consequence data is contained in the PROPDMG (and PROPDMGEXP) columns for property damage, and in CROPDMG (and CROPDMGEXP) columns for crop damage.
+
+For the required data analysis, the relevant data columns are EVTYPE, FATALITIES, INJURIES, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP. To read in data for only these columns, let us first define a vector identifying which columns will be read. Columns 8(EVTYPE), 23(FATALITIES), 24(INJURIES), 25(PROPDMG), 26(PROPDMGEXP), 27(CROPDMG), and 28(CROPDMGEXP). Only column 8, and 23:28 are required. The data in these columns is summarized below
+```{r summarize data, echo=TRUE}
+str(df[,c(3,c(23:28))])
+```
+
+Since PROPDMGEXP appears as a Factor variable and plays the same role as CROPDMGEXP, it makes sense to read in CROPDMGEXP as a Factor variable as well. EVTYPES should be a character variable and the other columns are numeric data. To read only the selected columns from the csv file, a vector of column classes is defined and passes to read.csv().
+```{r Assign column classes and read data, cache=TRUE}
+# Initialize the array collist to NULL in order to ignore reading in all columns
+collist <- rep("NULL",37) # Initialize to NA since most columns are to be ignored
+
+# Assign the column data type
+dty <- c("character", "numeric","numeric","numeric","factor","numeric","factor")
+collist[c(8, 23:28)] <- dty
+
+# Now read only the selected columns.
+df <- as.data.frame(read.csv("data/StormData.csv.bz2", header=TRUE, colClasses=collist))
+```
+
+
+### Data Exploration
+
+Next, look at the summary of the data.
+```{r Look at summary}
+#Summary
+str(df)
+
+#List of distinct values of df$EVTYPE
+head(levels(as.factor(df$EVTYPE)), n=20)
+
+# List of distinct values of df$CROPDMGEXP and df$PROPDMGEXP
+sort(union(levels(df$CROPDMGEXP), levels(df$PROPDMGEXP)))
+```
+
+A total of 985 distinct event labels are present in column EVTYPE. Some of these labels are repeats or correspond to the same weather event. For example, AVALANCE and AVALANCHE are the same event. Thus, entries in EVTYPE have to be resolved into distinct groups. The PROPDMGEXP and CROPDMGEXP columns contain a total of 20 multipliers which have to be converted into numbers before the CROPDMG and PROPDMG numbers can be calculated. Thus, data preprocessing is required.
+
+### Preprocessing 1: Resolving EVTYPE
+To preprocess EVTYPE, the entire column is saved as a vector where each entry is converted to uppercase just to ensure that distinct events do not differ due to capitalization.
+```{r save evtype}
+# Back up EVTYPE as evtypes
+evtypes <- toupper(df$EVTYPE)
+
+# Identify the distinct event types
+level1 <- levels(as.factor(evtypes))
+
+# The number of distinct levels at this stage
+length(level1)
+```
+Now go through the event names alphabetically. Start with event names that begin with A
+```{r Levels starting with A}
+level1[grep("^A",level1)]
+```
+
+ABNORMAL WARMTH is related to WARM. So search level1 with WARM
+```{r find WARM}
+level1[grep("WARM", level1)]
+```
+16 matches show up and they are all related to warm weather. So, these 16 can be grouped
+```{r groupwARM}
+evtypes[grep("WARM|WARMTH",evtypes)]="WARM"
+```
+
+Using the same logic, the following sequence of event name transformations is performed
+```{r set of event name transformations, cache=TRUE}
+# ABNORMALLY DRY contains DRY which occurs in 25 levels. Replace them all with DRY
+evtypes[grep("DRY",evtypes)]="DRY"
+
+# ABNORMALLY WET contains WET. WET appears in WET related, and WET SNOW
+# WET SNOW appears as [1] "HEAVY WET SNOW" "WET SNOW"
+# SNOW does not contain any options that imply wet snow
+evtypes[grep("WET SNOW",evtypes)]="WET SNOW"
+evtypes[intersect(grep("WET",evtypes), grep("SNOW", evtypes, invert=TRUE))]="WET"
+
+# ACCUMULATED SNOWFALL is just SNOWFALL. SNOW appears in 117 entries. To simplify
+# collect all terms containing SNOW into one group. Exclude SNOWMELT FLOODING,
+# BLIZZARD containg TERMS, SNOW/ICE or SLEET oR ICE(and or/) SNOW, LACK OF SNOW, 
+# SNOWMELT FLOODING
+evtypes[intersect(grep("SNOW",evtypes), grep("FLOOD", evtypes))]="SNOWMELT/FLOODING"
+evtypes[grep("LACK OF SNOW",evtypes)]="DRY"
+evtypes[intersect(grep("SNOW",evtypes), grep("SLEET|ICE", evtypes))]="SLEET"
+evtypes[grep("AVALANCHE", evtypes)]="AVALANCHE"
+evtypes[grep("BLIZZARD", evtypes)]="BLIZZARD"
+evtypes[intersect(grep("SNOW",evtypes), grep("FLOOD", evtypes, invert=TRUE))]="SNOW"
+
+#AGRICULTURAL FREEZE contains FREEZE which occurs in 8 event names
+evtypes[grep("FREEZE", evtypes)]="FREEZE"
+
+#APACHE COUNTY (in Arizona) is DRY
+evtypes[grep("APACHE", evtypes)]="DRY"
+
+# ASTRONOMICAL HIGH TIDE is a very high tide and may cause coastal erosion
+# ASTRONOMICAL LOW TIDE is a very low tide and may also cause coastal erosion
+evtypes[grep("ASTRONOMICAL", evtypes)]="COASTAL EROSION"
+
+# AVALANCHE AND AVALANCE are same
+evtypes[grep("AVAL", evtypes)]="AVALANCHE"
+             
+# Starting with B
+# BEACH EROSION contains EROSION (or EROSIN). THere are 8 events which have this
+evtypes[grep("EROSION|EROSIN", evtypes)]="COASTAl EROSION"
+
+#BEACH FLOOD, BLOW-OUT TIDE, BLOW-OUT TIDES, BREAKUP FLOODING could be related to
+#COASTAL EROSION
+evtypes[grep("BEACH FLOOD|BLOW-OUT TIDE|BREAKUP FLOODING", evtypes)]="COASTAl EROSION"
+
+#BELOW NORMAL PRECIPITATIOn is DRY
+evtypes[grep("BELOW NORMAL PRECIPITATION", evtypes)]="DRY"
+
+#BITTER WIND CHILL contains WIND CHILL that occurs in 14 events
+evtypes[grep("WIND CHILL", evtypes)]="WIND CHILL"
+
+#BLACK ICE can form when there is sleet. ICE returns 18 events which
+# can be split into SLEET like or ICE JAM FLOODING. 
+evtypes[grep("ICE JAM", evtypes)]="FLOODING/ICE JAM"
+
+# FLOODING contains FLOOD which occurs in FLASH FLOOD and other types of FLOODING
+evtypes[grep("FLASH", evtypes)]="FLOODING/FLASH"
+evtypes[intersect(grep("ICE", evtypes), grep("FLOOD",evtypes, invert=TRUE))]="SLEET"
+
+# BLOWING DUST CONTAINS DUST WHICH IS PRESENT as DUST and in association with WATERSPOUT
+# WATERSPOUT occurs in 12 events. Merge them all into one
+evtypes[grep("WATERSPOUT", evtypes)]="WATERSPOUT"
+# DUST now occurs in 8 events. combine them into BLOWING DUST
+evtypes[grep("DUST", evtypes)]="BLOWING DUST"
+
+# Now consider BRUSH FIRE. This is a type of wild fire. 
+# FIRE occurs in 11 events. Collect them all into WILDFIRE
+evtypes[grep("FIRE", evtypes)]="WILDFIRE"
+
+# Starting with C
+# COASTAL EROSION: Contains COASTAL in 10. Rename them all FLOODING/COASTAL
+# RENAME COASTAL EROSION as FLOODING/COASTAL
+evtypes[grep("COASTAL", evtypes)]="FLOODING/COASTAL"
+evtypes[grep("COASTAl EROSION", evtypes)]="FLOODING/COASTAL"
+
+# Next consider COLD: occurs as COLD, COLD AIR FUNNEL and COLD AIR TORNADO
+# COLD AIR FUNNEL, COLD AIR TORNADO, FUNNEL, FUNNEL CLOUD are similar. Merge
+evtypes[grep("FUNNEL|COLD AIR TORNADO", evtypes)]="COLD AIR FUNNEL CLOUDS"
+# COLD by itself occurs in 23 events. Exclude COLD AIR FUNNEL and merge them all
+evtypes[intersect(grep("COLD", evtypes), grep("FUNNEL",evtypes, invert=TRUE))]="COLD WEATHER"
+
+# COOL SPELL contains COOL that occurs in 3 events. Merge them
+evtypes[grep("COOL",evtypes)]="COOL WEATHER"
+
+# Starting with D
+# DAM BREAK/FAILURE occurs due to extra river water and causes flooding. So
+# classify this as FLOODING/RIVER
+evtypes[grep("DAM ",evtypes)]="FLOODING/RIVER"
+
+# DEEP HAIL contains HAIL which occurs in 44 events. Merge them all into HAIL
+evtypes[grep("HAIL",evtypes)]="HAIL"
+
+# DENSE FOG contains FOG. FOG appears in 4 events. Merge them
+evtypes[grep("FOG",evtypes)]="FOG"
+
+# DENSE SMOKE contains SMOKE which appears in 2 events. Merge them
+evtypes[grep("SMOKE",evtypes)]="SMOKE"
+
+# DOWNBURST usually associated with THUNDERSTORMS. Rename them
+evtypes[grep("DOWNBURST",evtypes)]="THUNDERSTORM"
+
+# DRIEST MONTH is DRY
+evtypes[grep("DRIEST MONTH",evtypes)]="DRY"
+
+# DROUGHT occurs in 6 events. Merge them
+evtypes[grep("DROUGHT",evtypes)]="DROUGHT"
+
+# Starting with E
+# EARLY FROST contains FROST which appears in 3 events. Merge them
+evtypes[grep("FROST",evtypes)]="FROST"
+
+# EARLY RAIN contains RAIN which appears in 56 events, that could be
+# further split into several distinct events
+# a) TSTM or THUNDERSTORM -> merge with THUNDERSTORM
+evtypes[intersect(grep("HEAVY RAIN", evtypes), grep("THUNDERSTORM|TSTM", evtypes))]="THUNDERSTORM"
+# b) URBAN -> FLOODING/URBAN
+evtypes[intersect(grep("HEAVY RAIN",evtypes), grep("URBAN",evtypes))]="FLOODING/URBAN"
+# c) HEAVY (HVY, EXCESSIVE) RAIN(RAINFALL) (MERGE all)
+evtypes[intersect(grep("HEAVY RAIN|EXCESSIVE RAIN",evtypes), grep("FLOODING", evtypes, invert=TRUE))]="HEAVY RAIN"
+# d) SLEET{&/}FREEZING or LIGHT FREEZING RAIN -> merge with SLEET
+evtypes[grep("FREEZING|SLEET", evtypes)]="SLEET"
+# e) FLOODING/HEAVY RAIN
+evtypes[intersect(grep("HEAVY RAIN", evtypes), grep("FLOOD", evtypes))]="FLOODING/HEAVY RAIN"
+# f) RAIN and FLOOD -> FLOODING/HEAVY RAIN
+evtypes[intersect(grep("RAIN", evtypes), grep("FLOOD", evtypes))]="FLOODING/HEAVY RAIN"
+# g) TORRENTIAL|HVY RAIN|RECORD RAINFALL|GUSTY WIND/RAIN\RAINSTORM which is same as HEAVY RAIN
+evtypes[grep("HVY|TORRENTIAL|RECORD RAINFALL|GUSTY WIND/RAIN/RAINSTORM|PROLONGEd RAIN", evtypes)]="HEAVY RAIN"
+# h) RAIN (HEAVY) is HEAVY RAIN
+evtypes[intersect(intersect(grep("HEAVY",evtypes),grep("RAIN",evtypes)),grep("FLOODING",evtypes,invert=TRUE))]="HEAVY RAIN"
+# i) Other RAIN containing events 
+evtypes[intersect(grep("RAIN|RAINFALL",evtypes), grep("HEAVY RAIN",evtypes, invert=TRUE))]="RAIN"
+
+# EXCESSIVE HEAT
+evtypes[grep("HEAT",evtypes)]="EXCESSIVE HEAT"
+
+# EXCESSIVE PRECIPITATION
+evtypes[grep("EXCESSIVE PRECIPITATION",evtypes)]="HEAVY RAIN"
+
+# EXTREME WINDCHILL
+evtypes[grep("WINDCHILL",evtypes)]="EXTREME WINDCHILL"
+
+# EXTREME by itself: Include in MISCELLANEOUS
+evtypes[intersect(grep("EXCESSIVE",evtypes), grep("HEAT",evtypes,invert=TRUE))]="MISCELLANEOUS"
+
+# Starting with F
+# FLOOD. Collect all Flood types into one
+evtypes[grep("FLOOD",evtypes)]="FLOODS"
+
+# Starting with G
+# GUSTY THUNDERSTORM WINDS -> THUNDERSTORM/WINDS
+evtypes[intersect(grep("THUNDERSTORM",evtypes), grep("WIND",evtypes))]="THUNDERSTORM/WINDS"
+
+# GLAZE -> SLEET
+evtypes[grep("GLAZE",evtypes)]="SLEET"
+
+#GUSTNADO are a form of WHIRLWIND
+evtypes[grep("GUSTNADO",evtypes)]="WHIRLWIND"
+
+#GRADIENT WIND(S), GUSTY LAKE WIND, GUSTY WIND(S) are all forms of WIND
+#WIND leads to several categories
+#a) TSTM WIND(S). TSTM APPEARs in NON-TSTP WIND (which is WIND) and TSTM WIND
+#a1) NON-TSTM WIND -> WIND
+evtypes[intersect(grep("TSTM",evtypes),grep("NON",evtypes))]="WIND"
+#a2) TSTM containing events -> THUNDERSTORM/WINDS
+evtypes[grep("TSTM",evtypes)]="THUNDERSTORM/WINDS"
+
+#b) THUNDERSTORM and WINDS appear in 20. Merge them into THUNDERSTORM/WINDS
+evtypes[grep("THUN",evtypes)]="THUNDERSTORM/WINDS"
+
+#c) HIGH WIND X, X>73 is a HURRICANE
+# Collect all HURRICANES into one event HURRICANE
+evtypes[grep("HURRICANE",evtypes)]="HURRICANE"
+# Now collect HIGH WINDS 73, 76, 80, 82 into HURRICANE
+evtypes[intersect(grep("WINDS",evtypes),grep("73|76|80|82",evtypes))]="HURRICANE"
+# Combine HIGH WINDS 40, 48, 55, 57, 58, 63, 66, 67, 70 into "GALE"
+evtypes[intersect(grep("WIND",evtypes),grep("G40|48|55|57|58|63|66|67|70",evtypes))]="GALE"
+# Combine all other HIGH WINDs to WIND
+evtypes[intersect(intersect(grep("HIGH",evtypes), grep("WIND", evtypes)), grep("WINTER",evtypes, invert=TRUE))]="WIND"
+# Combine (TUNDER/THUDER)STORM WINDS into THUNDERSTORM/WINDS
+evtypes[grep("THUDERSTORM|TUNDERSTORM",evtypes)]="THUNDERSTORM/WINDS"
+# COmbine WINTER STORM containing key words into WINTER STORM
+evtypes[grep("WINTER STORM",evtypes)]="WINTER STORM"
+# WIND CHILL contains CHILL that occurs in two
+evtypes[grep("CHILL",evtypes)]="WIND CHILL"
+# Merge HEAVY SURF AND WIND, LIGHTENING AND WINDS, MARINE STRONG WIND, STORM FORCE WINDS
+# into THUNDERSTORM/WINDS
+evtypes[grep("HEAVY SURF AND WIND|LIGHTNING AND WINDS|MARINE STRONG WIND|STORM FORCE WINDS|WIND STORM",evtypes)]="THUNDERSTORM/WINDS"
+# Replace MICROBURST with THUNDERSTORM/WINDs
+evtypes[grep("MICROBURST",evtypes)]="THUNDERSTORM/WINDS"
+# Replace all WIND containing terms except THUNDERSTORM/WINDS and WIND CHILL with WIND
+evtypes[intersect(grep("WIND",evtypes), grep("THUNDERSTORM/WINDS|WIND CHILL",evtypes, invert=TRUE))]="WIND"
+
+# Starting with H
+# a) HAZARDOUS SURF has SURF which is found in 10 events. Merge them all into HIGH SURF
+evtypes[grep("SURF",evtypes)]="HIGH SURF"
+# b) HIGH SWELLS/HIGH SEAS/HIGH SURF/HIGH TIDES/HIGH WATER/HEAVY SEAS/HEAVY SWELLS/^HIGH$/HIGH WAVES/
+evtypes[intersect(grep("SWELL|HIGH|HEAVY",evtypes), grep("RECORD|PRECIP|RAIN|SHOWER",evtypes,invert=TRUE))]="HIGH SWELLS"
+# c)HEAVY PRECIPITATION
+evtypes[grep("HEAVY PRECIP|HEAVY SHOW",evtypes)]="HEAVY RAIN"
+#d) HIGH TEMPERATURE RECORDS contains HIGH TEMPERATURE which can be HOT or HYPER and
+#   cause HYPERTHERMIA
+evtypes[grep("HIGH TEMPERATURE|HOT|HYPER",evtypes)]="HOT WEATHER"
+# e) HYPOTHERMIA is caused by cold weather
+evtypes[grep("HYPOTHERMIA",evtypes)]="COLD WEATHER"
+
+# Starting with I
+# ICY ROADS can form when there is cold weather or sleet. Bunch it with SLEET
+evtypes[grep("ICY",evtypes)]="SLEET"
+
+# Starting with L
+#LANDSPOUT is a type of TORNADO
+evtypes[grep("LANDSPOUT",evtypes)]="TORNADO"
+# LANDSLIDE/LANDSLUMP merge with MUDSLIDE
+evtypes[grep("LANDS|MUDSLIDE",evtypes)]="LANDSLIDE/MUDSLIDE"
+# LARGE WALL CLOUDS form in thunderstorms or can lead to tornados. Let us map them to tornados
+# which cause more damage. Take this occasion to merge TORNADO events
+evtypes[grep("LARGE WALL CLOUD",evtypes)]="TORNADO"
+evtypes[grep("TORNADO",evtypes)]="TORNADO"
+#LIGHTNING|LIGNTNING. Merge all events containing LIGHT
+evtypes[grep("LIGHT|LIGNT",evtypes)]="LIGHTNING"
+#LOW TEMPERATURE = COLD WEATHER
+evtypes[grep("LOW TEMPERATURE",evtypes)]="COLD WEATHER"
+
+# Starting with M
+# MUD SLIDE(S) or MUD/ROCK SLIDE
+evtypes[grep("MUD",evtypes)]="LANDSLIDE/MUDSLIDE"
+# MIXED PRECIPITATION or MIXED PRECIP is a WINTERY MIX
+evtypes[grep("MIX",evtypes)]="WINTERY MIX"
+# METRO STORM is a thunderstorm
+evtypes[grep("METRO STORM",evtypes)]="THUNDERSTORM/WINDS"
+# MARINE ACCIDENT/MISHAP can occur due to any number of reasons
+# if they are included due to a weather event, odds are that they come
+# from a thunderstorm/winds at sea. Include them under THUNDERSTORM
+evtypes[grep("MARINE",evtypes)]="THUNDERSTORM/WINDS"
+# MILD PATTERN/MISC/MONTHLY PRECIPITATION/MONTHYL TEMPERATURE : group into OTHERS
+evtypes[grep("^M",evtypes)]="OTHERS"
+
+# Starting with N
+# Group "NO sever weather", "none", "normal precipitation" into "OTHERS"
+evtypes[grep("^N",evtypes)]="OTHERS"
+
+# Starting with O
+# Group OTHER AND OTHERS into OTHERS
+evtypes[grep("^O",evtypes)]="OTHERS"
+
+# Starting with R
+# ROCK SLIDE -> LANDSLIDE/MUDSLIDE
+evtypes[grep("ROCK SLIDE",evtypes)]="LANDSLIDE/MUDSLIDE"
+# ROTATING WALL CLOUD -> TORNADO
+evtypes[grep("ROTATING WALL CLOUD",evtypes)]="TORNADO"
+# REMNANTS of FLOYD - > HURRICANE
+evtypes[grep("REMNANTS OF FLOYD",evtypes)]="HURRICANE"
+# RECORD HIGH|RECORD TEMPERATURE(S) are HOT
+evtypes[grep("RECORD HIGH|RECORD TEMPERATURE",evtypes)]="HOT WEATHER"
+# RECORD PRECIPITATION -> HEAVY RAIN
+evtypes[grep("RECORD PRECIPITATION",evtypes)]="HEAVY RAIN"
+# RECORD LOW -> COLD WEATHER
+evtypes[grep("RECORD LOW",evtypes)]="COLD WEATHER"
+# RED FLAG CRITERIA is related to WILDFIRE
+evtypes[grep("RED FLAG CRITERIA",evtypes)]="WILDFIRE"
+# RAPIDLY RISING WATER is associated with FLOODING
+evtypes[grep("RAPIDLY RISING WATER", evtypes)]="FLOODS"
+# RIP CURRENT(S)|ROGUE WAVE|ROUGH SEAS -> TURBULENT SEA
+evtypes[grep("RIP|ROGUE|ROUGH ",evtypes)]="TURBULENT SEA"
+
+# Starting with S
+#STORM SURGE -> THUNDERSTORM
+evtypes[grep("STORM SURGE",evtypes)]="THUNDERSTORM/WINDS"
+#SEICHE is standing water motion associated with WIND 
+evtypes[grep("SEICHE",evtypes)]="WIND"
+# SEVERE TURBULENCE is associated with THUNDERSTORM/WINDS
+evtypes[grep("SEVERE TURBULENCE",evtypes)]="WIND"
+# SMALL/SML STREAM FLOODING -> FLOODS
+evtypes[grep("SMALL|SML",evtypes)]="FLOODS"
+#SOUTHEAST : Not clear, but probably refers to southeast US which has hurricanes
+evtypes[grep("SOUTHEAST",evtypes)]="HURRICANE"
+# SUMMARY => OTHERS
+evtypes[grep("SUMMARY",evtypes)]="OTHERS"
+
+# Startinng with T
+# TEMPERATURE RECORD -> HOT WEATHER
+evtypes[grep("TEMPERATURE RECORD",evtypes)]="HOT WEATHER"
+# TYPHOON is just a HURRICANE
+evtypes[grep("TYPHOON",evtypes)]="HURRICANE"
+# TORNDAO is TORNADO
+evtypes[grep("TORNDAO",evtypes)]="TORNADO"
+# TROPICAL DEPRESSION/STORM could be a predecessor to HURRICANE
+evtypes[grep("TROPICAL",evtypes)]="HURRICANE"
+# TSUNAMI causes damage through Flooding
+evtypes[grep("TSUNAMI",evtypes)]="FLOODS"
+
+# Starting with U
+# UNSEASONAL LOW TEMP is COLD WEATHER
+evtypes[grep("UNSEASONAL LOW TEMP",evtypes)]="COLD WEATHER"
+#COLD AIR FUNNEL CLOUD could cause damage just a a TORNADO
+evtypes[grep("COLD AIR FUNNEL CLOUDS",evtypes)]="TORNADO"
+
+# Starting with V
+# VOG, VOLCANIC ASH*, VOLCANIC ERUPTION all come from VOLCANIC ACTIVITY
+evtypes[grep("VO",evtypes)]="VOLCANIC ACTIVITY"
+
+# Starting with W
+# WALL CLOUD is sometimes associated with TORNADO
+evtypes[grep("WALL CLOUD",evtypes)]="TORNADO"
+# WATER SPOUT is a non-supercell TORNADO
+evtypes[grep("WATER|WAYTER",evtypes)]="TORNADO"
+#WND is WIND
+evtypes[grep("WND",evtypes)]="WIND"
+#WET weather is probably related to RAIN
+evtypes[grep("WET",evtypes)]="RAIN"
+
+# NOTE THAT WINTER STORM BRINGS SNOW. SO INCLUDE SNOW UNDER WINTER STORM
+evtypes[grep("SNOW",evtypes)]="WINTER STORM"
+
+# SHORTEN THUNDERSTORM/WINDS to THUNDERSTORM
+evtypes[grep("THUNDERSTORM/WINDS",evtypes)]="THUNDERSTORM"
+
+# Another evtype is "?". Assign this to OTHERS
+evtypes[grep("\\?",evtypes)]="OTHERS"
+```
+
+Now, replace the EVTYPE column of df with evtypes and identify the number of distinct events
+```{r finalize evtype}
+df$EVTYPE <- evtypes
+df$EVTYPE <- as.factor(df$EVTYPE)
+length(levels(as.factor(df$EVTYPE)))
+```
+
+To summarize, after preprocessing EVTYPEs, 985 weather events have been grouped into 36 entries.
+
+### Preprocessing 2: Reconstructing cost values from number and multiplier
+The [documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) for the dataset suggests that economic costs are to be specified using a number up to 3 places of decimals and a character symbol B(for billion), K(for thousand), and H(for hundred). First, let us collect all symbols.
+
+```{r list of symbols}
+key_list <- sort(union(levels(df$CROPDMGEXP), levels(df$PROPDMGEXP)))
+key_list   # To print out list
+```
+
+Three things are apparent from this list: (a) The expected symbols B, M, K, and H appear in lower case as well and should be converted to the numerical multipliers 10^9, 10^6, 10^3, and 10^2, respectively, (b) numbers 0 to 8 are probably used to indicate multipliers 10^{0-8} respectively, and (c) "", "-","?","+" are multiplier labels with no clear interpretation and here they will be converted to the numerical value of 10^0.
+
+```{r construct multiplier list}
+# For each entry in key_list, identify a multiplier
+multiplier_list <- rep(as.integer(1), times=length(key_list)) # By default, multiply everything by 1
+multiplier_list[c(5:13)] <- as.integer(10^c(0:8)) # 0, 1, 2, 3, .., 8 -> 10^0, 10^1, 10^2, .., 10^8
+multiplier_list[c(14, 15, 16, 17, 18, 19, 20)] <- as.integer(c(10^9, 10^2, 10^2, 10^3, 10^3, 10^6, 10^6))
+```
+
+With the mapping of the scaling key to the multiplier list, a strategy for introducing these multipliers into the data frame is required. A simple approach is to just construct a data frame with the multipliers and merge it with the data frame based on the common column PROPDMGEXP or CROPDMGEXP. For this, first a data frame with the multipliers and appropriate column labels is needed. There are two columns with multipliers and each column can contain different multiplier labels for the same event. Hence, two multiplier data frames are constructed, one each for PROPDMGEXP and CROPDMGEXP.
+
+```{r make multiplier data frame, cache=TRUE}
+# Now create a data frame with key_list and multiplier_list as the two columns
+scaling_df_cols1 <- data.frame(key_list, multiplier_list)
+
+# Set the name of the columns to be PROPDMGEXP, SCALEPROPDMG
+colnames(scaling_df_cols1)<-c("PROPDMGEXP","SCALEDPROPDMG")
+
+# Now copy scaling_df_cols1 to scaling_df_cols2
+scaling_df_cols2 <- scaling_df_cols1
+
+# Set the name of the columns to be CROPDMGEXP, SCALEPROGDMG
+colnames(scaling_df_cols2)<-c("CROPDMGEXP","SCALEDCROPDMG")
+```
+
+The two multiplier data frames, scaling_df_cols1 and scaling_df_cols2, are now merged with the data frame, df. The product of numerical value (in CROPDMG OR PROPDMG) and multiplier (in SCALECROPDMG or SCALEPROPDMG) is evaluated and placed in the columns PROPDMG and CROPDMG. The sum of the scaled numerical value for CROPDMG and PROPDMG are added and saved in a new column TOTAL_ECON_COST. The sum of INJURIES AND FATALITIES are saved in a new column TOTAL_HUMAN_COST. Finally, only the columns for EVTYPE, PROPDMG, CROPDMG, FATALITIES, INJURIES, TOTAL_HUMAN_COST, TOTAL_ECON_COST are saved and the multipliers are discarded.
+
+```{r merge and save, cache=TRUE}
+# Now merge df with scaling_df_cols1
+df <- merge(df, scaling_df_cols1, by="PROPDMGEXP")
+
+# Next, merge df with scaling_df_cols2
+df <- merge(df, scaling_df_cols2, by="CROPDMGEXP")
+
+# Now, we can multiply SCALEDCROPDMG with CROPDMG to get a doller amount in millions of dollars
+finaldf <- df %>%
+           mutate(PROPDMG = PROPDMG*SCALEDPROPDMG/1000000, CROPDMG = CROPDMG*SCALEDCROPDMG/1000000) %>%
+           mutate(TOTAL_ECON_COST = PROPDMG + CROPDMG, TOTAL_HUMAN_COST = FATALITIES + INJURIES) %>%
+           select(EVTYPE, PROPDMG, CROPDMG, FATALITIES, INJURIES, TOTAL_HUMAN_COST, TOTAL_ECON_COST)
+```
+To summarize, the preceding steps have converted the multiplier and numerical value representing property and crop damage into a dollar value. The resulting data frame can now be processed in order to answer specific questions.
+
+### PREROCESSING 3: Summarizing data for Human Health and Economic Impact
+The data so far contains several instances of each weather event occurring between the years 01/1950 and 11/2011. As a first step, a summary number for each EVTYPE is generated
+```{r Summarize data by EVTYPE, cache=TRUE}
+# Now group all data by EVTYPE and summarize each column
+grouped_data <- finaldf %>%
+                group_by(EVTYPE) %>%
+                summarize_each(funs(sum))
+```
+
+The objective of this analysis is to identify the most significant weather events in terms of human and economic costs. Since human and economic costs from different weather events may differ, establishing the order of significance requires the creation of two new data frames, one for each human cost and another for economic cost.
+
+```{r Construct human impact data}
+# Next, construct a new data frames for human impact data
+human_impact <- grouped_data %>%
+                select(EVTYPE,FATALITIES,INJURIES, TOTAL_HUMAN_COST) %>%
+                arrange(desc(TOTAL_HUMAN_COST))
+
+# Next, construct a new data frame for economic impact
+economic_impact <- grouped_data %>%
+                select(EVTYPE, PROPDMG, CROPDMG, TOTAL_ECON_COST) %>%
+                arrange(desc(TOTAL_ECON_COST))
+```
+
+
+## Results
+### Human Health consequences of weather events
+The human consequences of weather events is quantified in terms of the total number of injuries and fatalities. Since there may be a large variation in TOTAL_HUMAN_COST values, a shortlist of events which have a TOTAL_HUMAN_COST less than 1% of the maximum value of TOTAL_HUMAN_COST is constructed, and all other weather events are summarized as OTHERS.
+```{r final human health impact summary}
+# Select the cutoff value to 1% of maximum value
+cutoff_human <- as.numeric(0.01*human_impact[1,4])
+
+# Select all rows which have impact value greater than equal to 1% of the maximum value
+human_select <- human_impact[which(human_impact$TOTAL_HUMAN_COST>=cutoff_human),]
+
+# Add up all rows with TOTAL_HUMAN_COST < cutoff_human into a new EVTYPE category = OTHERS
+human_others <- human_impact %>%
+                filter(TOTAL_HUMAN_COST<cutoff_human) %>%
+                select(FATALITIES, INJURIES, TOTAL_HUMAN_COST) %>%
+                replace(is.na(.), 0) %>%
+                summarize(EVTYPE="OTHERS", FATALITIES=sum(FATALITIES), INJURIES=sum(INJURIES), TOTAL_HUMAN_COST=sum(TOTAL_HUMAN_COST))         
+
+# Construct the final summary for human impact of weather events
+human_summary <- rbind(human_select, human_others)
+
+# Rename "TOTAL_HUMAN_COST" to "TOTAL"
+names(human_summary)[4] <- "TOTAL"
+```
+
+As a last step before presenting the final results, the human impact data frame is melted and an object for plotting created with ggplot2
+```{r make human impact plot}
+# Find the number of rows in human_summary
+nrow_human <- nrow(human_summary)
+
+# Find the top nrow_human names from long_human_summary
+top_human <- human_summary %>% head(nrow_human) %>% select(EVTYPE) %>% arrange(-row_number())
+
+# Long form human summary by melting
+long_human_summary <- melt(human_summary, id.vars="EVTYPE")
+
+# Make plot for Human effect
+g1 <- ggplot(long_human_summary, aes(x=EVTYPE, y=value, fill=variable))
+g1 <- g1 + geom_bar(stat="identity", position="dodge")
+g1 <- g1 + coord_flip()
+g1 <- g1 + scale_x_discrete(limits=top_human$EVTYPE)
+g1 <- g1 + xlab("Weather event")
+g1 <- g1 + ylab("Total number of humans affected")
+g1 <- g1 + ggtitle("Severe Weather Impact on Human Health (01/1950-11/2011)")
+g1 <- g1 + scale_fill_brewer(palette="Dark2")
+```
+The data for the weather events most consequential for human health is presented below
+```{r g1, echo=FALSE}
+plot(g1)
+```
+
+**ANALYSIS** 
+During the period 01/1950 to 11/2011, Tornadoes have caused the most harm to human health, based on injuries and fatalities. Excessive Heat, Floods and Thunderstorms have the next most significant negative affect on human health.
+
+### Economic consequences of weather events
+The economic consequences of weather events is quantified in terms of the total monetary value of crop damage and property damage. Since there may be a large variation in total economic cost values for different weather events, a shortlist of events which have a TOTAL_ECONOMIC_COST less than 1% of the maximum value of TOTAL_ECONOMIC_COST is constructed, and all other weather events are summarized as OTHERS.
+
+```{r final economic impact summary}
+# Select the cutoff value to 1% of maximum value
+cutoff_economic <- as.numeric(0.01*economic_impact[1,4])
+
+# Select all rows which have impact value greater than equal to 1% of the maximum value
+economic_select <- economic_impact[which(economic_impact$TOTAL_ECON_COST>=cutoff_economic),]
+
+# Add up all rows with TOTAL_ECON_COST < cutoff_economic into a new EVTYPE category = OTHERS
+economic_others <- economic_impact %>%
+                   filter(TOTAL_ECON_COST<cutoff_economic) %>%
+                   select(PROPDMG, CROPDMG, TOTAL_ECON_COST) %>%
+                   replace(is.na(.), 0) %>%
+                   summarize(EVTYPE="OTHERS", PROPDMG=sum(PROPDMG), CROPDMG=sum(CROPDMG), TOTAL_ECON_COST=sum(TOTAL_ECON_COST))         
+
+# Construct the final summary for human impact of weather events
+economic_summary <- rbind(economic_select, economic_others)
+```
+
+As a last step before presenting the final results, the human impact data frame is melted and an object for plotting created with ggplot2
+```{r make economic impact plot}
+# Now rename columns
+colnames(economic_summary)<-c("EVTYPE","PROPERTY DAMAGE","CROP DAMAGE","TOTAL DAMAGE")
+
+# Find the number of rows in economic_summary
+nrow_economic <- nrow(economic_summary)
+
+# Find the top nrow_economic names from long_economic_summary
+top_economic <- economic_summary %>% head(nrow_economic) %>% select(EVTYPE) %>% arrange(-row_number())
+
+# Melt the data frame
+long_economic_summary <- melt(economic_summary, id.vars="EVTYPE")
+
+# Make plot for Economic effect
+g2 <- ggplot(long_economic_summary, aes(x=EVTYPE, y=value, fill=variable))
+g2 <- g2 + geom_bar(stat="identity", position="dodge")
+g2 <- g2 + coord_flip()
+g2 <- g2 + scale_x_discrete(limits=top_economic$EVTYPE)
+g2 <- g2 + xlab("Weather event")
+g2 <- g2 + ylab("Total economic impact in Millions of US Dollars")
+g2 <- g2 + ggtitle("Economic Impact of Severe Weather(01/1950 - 11/2011)")
+g2 <- g2 + scale_fill_brewer(palette="Dark2")
+```
+
+The data for the weather events with the most economic consequences is presented below
+```{r g2, echo=FALSE}
+plot(g2)
+```
+
+**ANALYSIS** 
+During the period 01/1950 to 11/2011, Floods were responsible for the most economic impact primarily through property damage. Hurricanes, Thunderstorms, and Tornadoes are the other severe weather events which cause significant economic impact, primarily through property damage. Droughts, followed by Floods, cause the most damage to crops.
+
